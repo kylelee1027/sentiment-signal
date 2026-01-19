@@ -1,0 +1,149 @@
+# Stock Sentiment Predictor Configuration
+
+# Data Sources
+data_sources:
+  news:
+    - yahoo_finance
+    - google_news
+  social:
+    - reddit
+    - twitter
+  financial:
+    - seeking_alpha
+    - stocktwits
+
+# Scraping Settings
+scraping:
+  rate_limit_delay: 1.5  # seconds between requests
+  max_retries: 3
+  timeout: 10
+  max_articles_per_source: 100
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+# Sentiment Analysis Settings
+sentiment:
+  model: "finbert"  # Options: finbert, vader, textblob
+  batch_size: 16
+  aggregation_method: "weighted_average"  # Options: average, weighted_average, majority_vote
+  confidence_threshold: 0.6
+
+# Feature Engineering
+features:
+  technical_indicators:
+    - RSI
+    - MACD
+    - Bollinger_Bands
+    - SMA_20
+    - SMA_50
+    - SMA_200
+    - EMA_12
+    - EMA_26
+    - Volume_MA
+    - ATR
+  lookback_window: 60  # days
+  prediction_horizon: 5  # days
+  normalization: "min_max"  # Options: min_max, standard, robust
+
+# Model Configuration
+model:
+  architecture: "lstm_attention"
+  lstm_units: [128, 64]
+  attention_heads: 4
+  dropout_rate: 0.3
+  l2_regularization: 0.001
+  activation: "relu"
+  output_activation: "linear"
+
+# Training Settings
+training:
+  batch_size: 32
+  epochs: 100
+  learning_rate: 0.001
+  optimizer: "adam"
+  loss_function: "mse"
+  validation_split: 0.2
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.0001
+  learning_rate_schedule:
+    enabled: true
+    factor: 0.5
+    patience: 5
+
+# Backtesting Configuration
+backtesting:
+  initial_capital: 10000
+  commission: 0.001  # 0.1%
+  slippage: 0.0005   # 0.05%
+  position_sizing: "equal_weight"  # Options: equal_weight, risk_parity, kelly
+  max_positions: 5
+  rebalance_frequency: "daily"  # Options: daily, weekly, monthly
+  metrics:
+    - total_return
+    - sharpe_ratio
+    - sortino_ratio
+    - max_drawdown
+    - win_rate
+    - profit_factor
+    - calmar_ratio
+
+# Data Preprocessing
+preprocessing:
+  handle_missing: "forward_fill"  # Options: forward_fill, backward_fill, interpolate, drop
+  outlier_detection: true
+  outlier_method: "iqr"  # Options: iqr, zscore
+  outlier_threshold: 3
+
+# GCP Vertex AI Settings
+gcp:
+  project_id: ""
+  region: "us-central1"
+  bucket_name: "sentiment-signal-data"
+  machine_type: "n1-standard-4"
+  accelerator_type: "NVIDIA_TESLA_T4"
+  accelerator_count: 1
+
+# Logging
+logging:
+  level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/app.log"
+  max_bytes: 10485760  # 10 MB
+  backup_count: 5
+
+# Monitoring & Alerts
+monitoring:
+  enabled: false
+  metrics_interval: 300  # seconds
+  alert_thresholds:
+    error_rate: 0.05
+    latency_p95: 5.0  # seconds
+    model_drift: 0.1
+
+# Cache Settings
+cache:
+  enabled: true
+  ttl: 3600  # seconds
+  max_size: 1000  # entries
+
+# Stock Universe
+stocks:
+  default_tickers:
+    - AAPL
+    - MSFT
+    - GOOGL
+    - AMZN
+    - TSLA
+    - NVDA
+    - META
+    - JPM
+    - V
+    - JNJ
+  sectors:
+    - Technology
+    - Healthcare
+    - Financials
+    - Consumer
+    - Energy
+    - Industrials
