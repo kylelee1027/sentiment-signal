@@ -15,6 +15,11 @@ import logging
 from urllib.parse import quote
 import re
 import yfinance as yf
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -132,8 +137,6 @@ class YahooFinanceScraper(BaseNewsScraper):
                             'type': article_type,
                             'thumbnail_url': thumbnail_url
                         })
-                        print(articles)
-
                     except Exception as e:
                         logger.debug(f"Error parsing news item: {e}")
                         continue
@@ -175,7 +178,11 @@ class GoogleNewsScraper(BaseNewsScraper):
         logger.info(f"Scraping Google News for {company_name}")
 
         try:
-            url = f"{self.base_url}?q={quote(query)}&tbm=nws"
+            # Build URL with date range filter
+            # Format: tbs=cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY
+            date_filter = f"cdr:1,cd_min:{start_date.strftime('%m/%d/%Y')},cd_max:{end_date.strftime('%m/%d/%Y')}"
+            url = f"{self.base_url}?q={quote(query)}&tbm=nws&tbs={date_filter}"
+            logger.info(f"Fetching URL: {url}")
             response = self._make_request(url)
 
             if not response:
@@ -183,36 +190,62 @@ class GoogleNewsScraper(BaseNewsScraper):
 
             soup = BeautifulSoup(response.content, 'html.parser')
 
-            # Find news articles
-            article_elements = soup.find_all('div', class_='SoaBEf')
+            # Find article containers - actual structure: div class="Gx5Zad xpd EtOod pkphOe"
+            article_containers = soup.find_all('div', class_='Gx5Zad')
 
-            if not article_elements:
-                # Alternative selector
-                article_elements = soup.find_all('div', {'data-sokoban-container': True})
+            logger.info(f"Found {len(article_containers)} article containers")
 
-            for article in article_elements[:30]:
+            for idx, container in enumerate(article_containers[:30], 1):
                 try:
-                    # Extract title and link
-                    title_elem = article.find('div', role='heading') or article.find('h3')
+                    # Find the main link (<a> tag that wraps the article)
+                    link_elem = container.find('a', href=True)
+                    if not link_elem:
+                        logger.debug(f"Article {idx}: No link found")
+                        continue
+
+                    link = link_elem['href']
+
+                    # Skip navigation links (Next, etc)
+                    if 'nBDE1b' in link_elem.get('class', []):
+                        continue
+
+                    # Extract title - it's in div with class "ilUpNd UFvD1"
+                    title_elem = container.find('div', class_='ilUpNd UFvD1')
                     if not title_elem:
+                        # Try alternative - h3 tag
+                        title_elem = container.find('h3')
+
+                    if not title_elem:
+                        logger.debug(f"Article {idx}: No title found")
                         continue
 
                     title = title_elem.get_text(strip=True)
-                    link_elem = article.find('a')
-                    link = link_elem['href'] if link_elem else ""
 
-                    # Extract source
-                    source_elem = article.find('div', class_='CEMjEf')
+                    # Extract source - div with class "ilUpNd BamJPe aSRlid XR4uSe"
+                    source_elem = container.find('div', class_='BamJPe')
                     source = source_elem.get_text(strip=True) if source_elem else "Google News"
 
-                    # Extract snippet
-                    snippet_elem = article.find('div', class_='GI74Re')
-                    snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+                    # Extract snippet/content - div with class "ilUpNd H66NU aSRlid"
+                    snippet_elem = container.find('div', class_='H66NU')
+                    snippet = ""
+                    if snippet_elem:
+                        snippet_text = snippet_elem.get_text(strip=True)
+                        # Remove the date from the snippet if it's there
+                        # Date is usually at the end after the content
+                        snippet = snippet_text
 
-                    # Extract date
-                    date_elem = article.find('span', class_='r0bn4c')
-                    article_date = self._parse_date(date_elem.get_text(strip=True)) if date_elem else datetime.now()
+                    # Extract date - span with class "UK5aid MDvRSc"
+                    date_elem = container.find('span', class_='UK5aid')
+                    article_date = datetime.now()
 
+                    if date_elem:
+                        date_str = date_elem.get_text(strip=True)
+                        article_date = self._parse_date(date_str)
+                        # Remove date from snippet if it was included
+                        if snippet and date_str in snippet:
+                            snippet = snippet.replace(date_str, '').strip()
+
+                    # Add article (Google already filtered by date range)
                     articles.append({
                         'title': title,
                         'content': snippet,
@@ -221,12 +254,13 @@ class GoogleNewsScraper(BaseNewsScraper):
                         'date': article_date,
                         'ticker': ticker
                     })
+                    logger.debug(f"Article {idx}: Successfully parsed - {title[:50]}...")
 
                 except Exception as e:
-                    logger.debug(f"Error parsing Google News article: {e}")
+                    logger.debug(f"Error parsing article {idx}: {e}")
                     continue
 
-            logger.info(f"Found {len(articles)} articles from Google News")
+            logger.info(f"Collected {len(articles)} articles from Google News (within date range)")
 
         except Exception as e:
             logger.error(f"Error scraping Google News: {e}")
@@ -234,28 +268,162 @@ class GoogleNewsScraper(BaseNewsScraper):
         return articles
 
     def _parse_date(self, date_str: str) -> datetime:
-        """Parse Google News date format"""
+        """Parse Google News date format (relative dates like '14 hours ago')"""
         try:
             now = datetime.now()
+            date_lower = date_str.lower().strip()
 
-            if 'ago' in date_str.lower():
-                if 'hour' in date_str:
-                    hours = int(re.search(r'(\d+)', date_str).group(1))
-                    return now - timedelta(hours=hours)
-                elif 'day' in date_str:
-                    days = int(re.search(r'(\d+)', date_str).group(1))
-                    return now - timedelta(days=days)
-                elif 'minute' in date_str:
-                    minutes = int(re.search(r'(\d+)', date_str).group(1))
-                    return now - timedelta(minutes=minutes)
-                elif 'week' in date_str:
-                    weeks = int(re.search(r'(\d+)', date_str).group(1))
-                    return now - timedelta(weeks=weeks)
+            if 'ago' in date_lower:
+                # Extract number from string
+                num_match = re.search(r'(\d+)', date_str)
+                if not num_match:
+                    return now
 
-        except Exception:
-            pass
+                num = int(num_match.group(1))
+
+                if 'hour' in date_lower:
+                    return now - timedelta(hours=num)
+                elif 'day' in date_lower:
+                    return now - timedelta(days=num)
+                elif 'minute' in date_lower:
+                    return now - timedelta(minutes=num)
+                elif 'week' in date_lower:
+                    return now - timedelta(weeks=num)
+                elif 'month' in date_lower:
+                    return now - timedelta(days=num * 30)  # Approximate
+                elif 'year' in date_lower:
+                    return now - timedelta(days=num * 365)  # Approximate
+
+            # Try to parse absolute dates if present
+            for fmt in ['%B %d, %Y', '%b %d, %Y', '%Y-%m-%d', '%m/%d/%Y']:
+                try:
+                    return datetime.strptime(date_str, fmt)
+                except ValueError:
+                    continue
+
+        except Exception as e:
+            logger.debug(f"Error parsing date '{date_str}': {e}")
 
         return datetime.now()
+
+
+class NewsAPIScraper(BaseNewsScraper):
+    """
+    Scraper for NewsAPI.org
+    
+    This will also only be used for gathering recent news articles. API key required. Once upgraded to paid plan, 
+    can use for historical data as well.
+    """
+
+    def __init__(self, rate_limit_delay: float = 1.0):
+        super().__init__(rate_limit_delay)
+        self.api_key = os.getenv('NEWS_API_KEY')
+        self.base_url = "https://newsapi.org/v2/everything"
+
+        if not self.api_key:
+            logger.warning("NEWS_API_KEY not found in environment variables")
+
+    def scrape(self, ticker: str, company_name: str,
+               start_date: datetime, end_date: datetime) -> List[Dict]:
+        """
+        Scrape news from NewsAPI
+
+        Args:
+            ticker: Stock ticker symbol
+            company_name: Company name for search query
+            start_date: Start date for news articles
+            end_date: End date for news articles
+
+        Returns:
+            List of dictionaries containing article data
+        """
+        articles = []
+
+        if not self.api_key:
+            logger.error("Cannot scrape NewsAPI without API key")
+            return articles
+
+        logger.info(f"Fetching NewsAPI news for {company_name}")
+
+        try:
+            time.sleep(self.rate_limit_delay)
+
+            # Build query - search for company name and stock-related terms
+            query = f'"{company_name}" OR {ticker} AND (stock OR shares OR trading OR market)'
+
+            # API parameters
+            params = {
+                'q': query,
+                'from': start_date.strftime('%Y-%m-%d'),
+                'to': end_date.strftime('%Y-%m-%d'),
+                'language': 'en',
+                'sortBy': 'publishedAt',
+                'pageSize': 100,  # Max results per request
+                'apiKey': self.api_key
+            }
+
+            response = requests.get(self.base_url, params=params, timeout=10)
+            response.raise_for_status()
+
+            data = response.json()
+
+            if data.get('status') != 'ok':
+                logger.error(f"NewsAPI error: {data.get('message', 'Unknown error')}")
+                return articles
+
+            total_results = data.get('totalResults', 0)
+            logger.info(f"NewsAPI returned {total_results} total results")
+
+            for item in data.get('articles', []):
+                try:
+                    # Parse publication date
+                    published_at = item.get('publishedAt', '')
+                    if published_at:
+                        # NewsAPI returns ISO 8601 format: 2024-01-19T10:30:00Z
+                        article_date = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
+                        # Convert to naive datetime for consistency
+                        article_date = article_date.replace(tzinfo=None)
+                    else:
+                        article_date = datetime.now()
+
+                    title = item.get('title', '')
+                    description = item.get('description', '')
+                    content = item.get('content', '')
+                    url = item.get('url', '')
+                    source_name = item.get('source', {}).get('name', 'NewsAPI')
+                    author = item.get('author', '')
+
+                    # Skip articles with removed content
+                    if title == '[Removed]' or not title:
+                        continue
+
+                    # Combine description and content for fuller text
+                    full_content = description
+                    if content and content != description:
+                        full_content = f"{description} {content}" if description else content
+
+                    articles.append({
+                        'title': title,
+                        'content': full_content,
+                        'url': url,
+                        'source': source_name,
+                        'date': article_date,
+                        'ticker': ticker,
+                        'author': author
+                    })
+
+                except Exception as e:
+                    logger.debug(f"Error parsing NewsAPI article: {e}")
+                    continue
+
+            logger.info(f"Collected {len(articles)} articles from NewsAPI")
+
+        except requests.RequestException as e:
+            logger.error(f"Error fetching from NewsAPI: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error with NewsAPI: {e}")
+
+        return articles
 
 
 class NewsAggregator:
@@ -264,7 +432,7 @@ class NewsAggregator:
     def __init__(self, sources: Optional[List[str]] = None, rate_limit_delay: float = 1.5):
         """
         Args:
-            sources: List of source names to use. Default: ['yahoo', 'google']
+            sources: List of source names to use. Default: ['yahoo', 'google', 'newsapi']
             rate_limit_delay: Delay between requests
         """
         self.rate_limit_delay = rate_limit_delay
@@ -273,6 +441,7 @@ class NewsAggregator:
         self.scrapers = {
             'yahoo': YahooFinanceScraper(rate_limit_delay),
             'google': GoogleNewsScraper(rate_limit_delay),
+            'newsapi': NewsAPIScraper(rate_limit_delay),
         }
 
         # Use specified sources or all available
@@ -303,7 +472,10 @@ class NewsAggregator:
                 continue
 
             try:
-                articles = scraper.scrape(ticker, company_name, start_date, end_date)
+                if source_name == 'yahoo':
+                    articles = scraper.scrape(ticker)
+                else:
+                    articles = scraper.scrape(ticker, company_name, start_date, end_date)
                 all_articles.extend(articles)
             except Exception as e:
                 logger.error(f"Error scraping {source_name}: {e}")
@@ -339,8 +511,8 @@ if __name__ == "__main__":
     parser.add_argument('--start-date', required=True, help='Start date (YYYY-MM-DD)')
     parser.add_argument('--end-date', required=True, help='End date (YYYY-MM-DD)')
     parser.add_argument('--output', help='Output CSV file path')
-    parser.add_argument('--sources', nargs='+', default=['yahoo', 'google'],
-                        help='News sources to use (default: yahoo google)')
+    parser.add_argument('--sources', nargs='+', default=['yahoo', 'google', 'newsapi'],
+                        help='News sources to use (default: yahoo google newsapi)')
     parser.add_argument('--delay', type=float, default=1.5,
                         help='Rate limit delay in seconds (default: 1.5)')
 

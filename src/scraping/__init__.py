@@ -6,6 +6,7 @@ from .news_scraper import (
     BaseNewsScraper,
     YahooFinanceScraper,
     GoogleNewsScraper,
+    NewsAPIScraper,
     NewsAggregator
 )
 from .utils import (
@@ -20,6 +21,7 @@ __all__ = [
     'BaseNewsScraper',
     'YahooFinanceScraper',
     'GoogleNewsScraper',
+    'NewsAPIScraper',
     'NewsAggregator',
     'clean_text',
     'normalize_ticker',
