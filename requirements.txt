@@ -12,3 +12,12 @@ yfinance==0.2.54
 # Configuration
 python-dotenv==1.0.1
 pyyaml==6.0.1
+
+# Sentiment Analysis
+transformers==4.37.2
+torch==2.2.0
+vaderSentiment==3.3.2
+textblob==0.17.1
+
+# Paper Trading
+alpaca-py==0.29.2
